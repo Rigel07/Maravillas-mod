@@ -1,0 +1,55 @@
+name: Build Maravillas del Mundo
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.1.1
+
+      - name: Descomprimir el zip y compilar
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/salida"
+          N=0
+          while IFS= read -r -d '' ZIP; do
+            N=$((N+1))
+            DIR="/tmp/proyecto_$N"
+            mkdir -p "$DIR"
+            unzip -q "$ZIP" -d "$DIR"
+            SETTINGS=$(find "$DIR" -name settings.gradle | head -n 1)
+            if [ -z "$SETTINGS" ]; then
+              echo "El zip $ZIP no contiene un proyecto Gradle: lo ignoro"
+              continue
+            fi
+            echo "Compilando $ZIP"
+            (cd "$(dirname "$SETTINGS")" && gradle build --no-daemon)
+            cp "$(dirname "$SETTINGS")"/build/libs/*.jar "$GITHUB_WORKSPACE/salida/"
+          done < <(find . -maxdepth 2 -name '*.zip' -not -path './.git/*' -print0)
+          if [ "$N" -eq 0 ]; then
+            echo "No hay zip: busco el proyecto ya subido en el repositorio"
+            SETTINGS=$(find "$GITHUB_WORKSPACE" -name settings.gradle -not -path '*/.git/*' | head -n 1)
+            if [ -z "$SETTINGS" ]; then
+              echo "No encuentro settings.gradle. Sube el zip del mod al repositorio."
+              exit 1
+            fi
+            (cd "$(dirname "$SETTINGS")" && gradle build --no-daemon)
+            cp "$(dirname "$SETTINGS")"/build/libs/*.jar "$GITHUB_WORKSPACE/salida/"
+          fi
+          ls -la "$GITHUB_WORKSPACE/salida"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maravillas-jar
+          path: salida/*.jar
